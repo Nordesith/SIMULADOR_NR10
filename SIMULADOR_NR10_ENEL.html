@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador 3D NR-10 | Padrão Enel & SENAI Sobral</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0b1120; font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; user-select: none; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        .hud-panel { background: rgba(15, 23, 42, 0.90); backdrop-filter: blur(10px); border: 1px solid rgba(56, 189, 248, 0.28); }
+        .enel-senai-bar { background: linear-gradient(90deg, #0055a5 0%, #e4002b 50%, #f59e0b 100%); }
+        
+        /* Pílulas minimalistas de ID 3D (Sem poluição visual) */
+        .id-badge-3d {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 9999px;
+            letter-spacing: 0.04em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.65);
+            user-select: none;
+            z-index: 5;
+        }
+        .id-badge-3d:hover {
+            transform: translate(-50%, -50%) scale(1.22);
+            z-index: 20;
+        }
+        .badge-tool {
+            background: rgba(15, 23, 42, 0.92);
+            color: #38bdf8;
+            border: 1.5px solid #38bdf8;
+        }
+        .badge-equip {
+            background: rgba(15, 23, 42, 0.92);
+            color: #facc15;
+            border: 1.5px solid #facc15;
+        }
+        .badge-selected {
+            background: #facc15 !important;
+            color: #0f172a !important;
+            border-color: #ffffff !important;
+            box-shadow: 0 0 16px rgba(250, 204, 21, 0.95);
+            transform: translate(-50%, -50%) scale(1.25);
+        }
+        .badge-ping {
+            animation: ping-pulse 0.8s infinite alternate;
+        }
+        @keyframes ping-pulse {
+            0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0px #22c55e; }
+            100% { transform: translate(-50%, -50%) scale(1.38); box-shadow: 0 0 18px #22c55e; border-color: #22c55e; }
+        }
+        @keyframes pulse-border { 0%, 100% { border-color: rgba(250,204,21,0.9); } 50% { border-color: rgba(250,204,21,0.25); } }
+        .step-active { animation: pulse-border 2s infinite; }
+        
+        /* Scrollbar fina para o catálogo */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.4); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <!-- Camada de Pílulas Minimalistas de ID 3D -->
+    <div id="labels-container" class="fixed inset-0 pointer-events-none overflow-hidden z-0"></div>
+
+    <!-- Cabeçalho Técnico e Câmeras Táticas -->
+    <header class="fixed top-0 left-0 right-0 z-20 p-2.5 flex flex-wrap justify-between items-center hud-panel border-b border-slate-700">
+        <div class="flex items-center space-x-3">
+            <div class="w-2.5 h-10 rounded enel-senai-bar"></div>
+            <div>
+                <div class="flex items-center space-x-2">
+                    <span class="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SENAI Sobral</span>
+                    <span class="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">Padrão Enel 13,8 kV</span>
+                    <h1 class="text-white font-bold text-sm sm:text-base tracking-wide">Simulador 3D — 5 Regras de Ouro NR-10</h1>
+                </div>
+                <p class="text-slate-400 text-[11px]">Clique nos <b>IDs no ambiente 3D</b> ou localize-os no <b>Catálogo de IDs</b> à direita</p>
+            </div>
+        </div>
+
+        <!-- Botões de Câmera Rápida -->
+        <div class="flex items-center space-x-1.5 my-1 sm:my-0">
+            <span class="text-[10px] text-slate-400 uppercase mr-1 hidden md:inline">Câmeras:</span>
+            <button onclick="moveCamera('overview')" class="bg-slate-800 hover:bg-sky-700 text-white text-xs px-2.5 py-1.5 rounded border border-slate-600 transition">
+                🌐 Geral
+            </button>
+            <button onclick="moveCamera('bench')" class="bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 text-xs font-bold px-2.5 py-1.5 rounded border border-amber-500/50 transition">
+                🧰 Bancada (F-01..F-06)
+            </button>
+            <button onclick="moveCamera('cutouts')" class="bg-slate-800 hover:bg-sky-700 text-white text-xs px-2.5 py-1.5 rounded border border-slate-600 transition">
+                ⚡ Chaves (E-01)
+            </button>
+            <button onclick="moveCamera('trafo')" class="bg-slate-800 hover:bg-sky-700 text-white text-xs px-2.5 py-1.5 rounded border border-slate-600 transition">
+                🔋 Trafo & Terra (E-02/E-03)
+            </button>
+            <button onclick=" toggleBadgeVisibility()" id="btn-toggle-ids" class="bg-slate-900 hover:bg-slate-700 text-sky-400 text-xs px-2.5 py-1.5 rounded border border-sky-500/40 transition" title="Mostrar/Ocultar Pílulas 3D">
+                🏷️ IDs: ON
+            </button>
+        </div>
+
+        <!-- Status da Rede & Pontuação -->
+        <div class="flex items-center space-x-2">
+            <div class="bg-slate-900/90 px-2.5 py-1 rounded border border-slate-700 flex items-center space-x-1.5">
+                <span class="text-[10px] text-slate-400 uppercase">Rede:</span>
+                <span id="grid-status" class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-600 text-white animate-pulse">13,8 kV VIVA</span>
+            </div>
+            <div class="bg-slate-900/90 px-2.5 py-1 rounded border border-slate-700">
+                <span id="lives-display" class="text-xs font-bold text-red-400">❤️❤️❤️</span>
+            </div>
+            <div class="bg-slate-900/90 px-2.5 py-1 rounded border border-slate-700">
+                <span class="text-[10px] text-slate-400 uppercase">PTS:</span>
+                <span id="score-display" class="text-xs font-mono font-bold text-amber-400 ml-1">0000</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Painel Esquerdo: Checklist das 5 Regras de Ouro (Referenciando IDs) -->
+    <aside class="fixed top-16 left-3 z-20 w-76 max-w-[300px] hud-panel rounded-xl p-3.5 text-slate-200 shadow-2xl">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-sky-400 border-b border-slate-700 pb-2 mb-2.5 flex justify-between items-center">
+            <span>Ordem de Manobra NR-10</span>
+            <span id="step-counter" class="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-[11px]">Regra 1/5</span>
+        </h2>
+
+        <div class="space-y-1.5 text-xs">
+            <div id="rule-0" class="p-2 rounded border border-amber-400 bg-amber-500/10 step-active transition">
+                <div class="font-bold text-amber-300 flex justify-between">
+                    <span>1. Seccionamento</span>
+                    <span class="status-icon">⏳</span>
+                </div>
+                <p class="text-slate-300 mt-0.5 text-[11px]">Pegue <b class="text-sky-300 font-mono">[F-01]</b> na bancada e acione as 3 chaves em <b class="text-amber-300 font-mono">[E-01]</b>.</p>
+            </div>
+
+            <div id="rule-1" class="p-2 rounded border border-slate-700 bg-slate-800/50 opacity-60 transition">
+                <div class="font-bold text-slate-300 flex justify-between">
+                    <span>2. Impedimento (LOTO)</span>
+                    <span class="status-icon">🔒</span>
+                </div>
+                <p class="text-slate-400 mt-0.5 text-[11px]">Pegue <b class="text-sky-300 font-mono">[F-02]</b> na bancada e aplique nas chaves <b class="text-amber-300 font-mono">[E-01]</b>.</p>
+            </div>
+
+            <div id="rule-2" class="p-2 rounded border border-slate-700 bg-slate-800/50 opacity-60 transition">
+                <div class="font-bold text-slate-300 flex justify-between">
+                    <span>3. Ausência de Tensão</span>
+                    <span class="status-icon">🔒</span>
+                </div>
+                <p class="text-slate-400 mt-0.5 text-[11px]">Pegue <b class="text-sky-300 font-mono">[F-03]</b>, teste em <b class="text-sky-300 font-mono">[F-06]</b> e meça as 3 buchas <b class="text-amber-300 font-mono">[E-02]</b>.</p>
+            </div>
+
+            <div id="rule-3" class="p-2 rounded border border-slate-700 bg-slate-800/50 opacity-60 transition">
+                <div class="font-bold text-slate-300 flex justify-between">
+                    <span>4. Aterramento Temp.</span>
+                    <span class="status-icon">🔒</span>
+                </div>
+                <p class="text-slate-400 mt-0.5 text-[11px]">Pegue <b class="text-sky-300 font-mono">[F-04]</b>: Conecte 1º em <b class="text-amber-300 font-mono">[E-03]</b> e 2º em <b class="text-amber-300 font-mono">[E-02]</b>.</p>
+            </div>
+
+            <div id="rule-4" class="p-2 rounded border border-slate-700 bg-slate-800/50 opacity-60 transition">
+                <div class="font-bold text-slate-300 flex justify-between">
+                    <span>5. Proteção Adjacente</span>
+                    <span class="status-icon">🔒</span>
+                </div>
+                <p class="text-slate-400 mt-0.5 text-[11px]">Pegue <b class="text-sky-300 font-mono">[F-05]</b> na bancada e isole a linha viva <b class="text-amber-300 font-mono">[E-04]</b>.</p>
+            </div>
+        </div>
+
+        <!-- Item Segurado pelo EletroBral -->
+        <div class="mt-2.5 pt-2.5 border-t border-slate-700">
+            <div class="text-[10px] uppercase text-slate-400 font-bold mb-1">Em mãos (EletroBral):</div>
+            <div id="held-tool-box" class="p-2 rounded bg-slate-900 border border-amber-500/50 flex items-center space-x-2">
+                <span id="held-tool-id" class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono text-xs font-bold">---</span>
+                <div>
+                    <div id="held-tool-name" class="text-xs font-bold text-amber-300">Mãos Livres</div>
+                    <div id="held-tool-desc" class="text-[10px] text-slate-400">Clique em F-01 a F-05 na bancada</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Painel Direito: Catálogo Interativo de IDs (Busca + Localizador) e Mascote -->
+    <aside class="fixed top-16 right-3 z-20 w-80 hud-panel rounded-xl p-3.5 text-slate-200 shadow-2xl flex flex-col max-h-[calc(100vh-5rem)]">
+        
+        <!-- Busca Rápida por ID ou Nome -->
+        <div class="mb-2.5">
+            <div class="flex justify-between items-center mb-1.5">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-sky-400">🔎 Catálogo Técnico de IDs</h2>
+                <span class="text-[10px] text-slate-400">Clique p/ focar ou acionar</span>
+            </div>
+            <input 
+                id="id-search-input" 
+                type="text" 
+                placeholder="Filtrar por ID (ex: F-01, E-02) ou nome..." 
+                oninput="filterCatalog(this.value)"
+                class="w-full bg-slate-900/90 border border-slate-600 focus:border-sky-400 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition"
+            />
+        </div>
+
+        <!-- Lista de IDs Categorizada -->
+        <div id="catalog-list" class="overflow-y-auto space-y-1.5 pr-1 max-h-60 border-b border-slate-700 pb-2.5 mb-2.5">
+            <!-- Preenchido dinamicamente pelo JS -->
+        </div>
+
+        <!-- Mascote SENAI Sobral: EletroBral -->
+        <div class="flex items-center space-x-2.5 pb-2 mb-2 border-b border-slate-700">
+            <div class="w-9 h-9 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-lg shrink-0">
+                👷‍♂️
+            </div>
+            <div>
+                <div class="text-xs font-bold text-white flex items-center space-x-1">
+                    <span>EletroBral</span>
+                    <span class="bg-amber-500 text-slate-950 text-[9px] font-extrabold px-1.5 py-0.2 rounded">SENAI SOBRAL</span>
+                </div>
+                <p id="mascot-speech" class="text-[11px] text-amber-200 leading-tight mt-0.5">
+                    "Use os códigos <b>F-01 a F-06</b> na bancada e <b>E-01 a E-04</b> no poste!"
+                </p>
+            </div>
+        </div>
+
+        <!-- Diário de Bordo COI -->
+        <div id="log-box" class="h-24 overflow-y-auto space-y-1.5 text-[11px] pr-1 font-mono">
+            <div class="p-1.5 rounded bg-slate-800/90 border-l-4 border-sky-500 text-slate-200">
+                [COI]: Consulte a tabela de IDs acima. Clique em [F-01] na bancada para iniciar.
+            </div>
+        </div>
+    </aside>
+
+    <!-- Modal Final de Certificação -->
+    <div id="victory-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-lg w-full max-h-[94vh] overflow-y-auto p-6 text-center shadow-2xl">
+            <div class="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-3 text-3xl">
+                🏆
+            </div>
+            <h2 class="text-2xl font-bold text-white mb-1">Manobra Concluída com Sucesso!</h2>
+            <p class="text-emerald-400 text-sm font-semibold mb-4">Turma SENAI Sobral — Padrão Enel 13,8 kV Desenergizado e Seguro</p>
+            <div class="bg-slate-800 rounded-lg p-3.5 text-left text-xs text-slate-300 space-y-1.5 mb-5 border border-slate-700 font-mono">
+                <div>✔️ <b>[F-01 ➔ E-01] Seccionamento:</b> Abertura das 3 chaves fusíveis.</div>
+                <div>✔️ <b>[F-02 ➔ E-01] Impedimento:</b> Cartuchos retirados e placa LOTO instalada.</div>
+                <div>✔️ <b>[F-03 + F-06 ➔ E-02] Ausência de Tensão:</b> Detector testado e buchas em 0 kV.</div>
+                <div>✔️ <b>[F-04 ➔ E-03 ➔ E-02] Aterramento:</b> Trado de terra conectado antes das fases.</div>
+                <div>✔️ <b>[F-05 ➔ E-04] Zona Controlada:</b> Mantas isolantes na linha adjacente.</div>
+            </div>
+            <div class="flex justify-between items-center bg-slate-950 p-3 rounded-lg mb-5">
+                <span class="text-slate-400 text-sm">Pontuação Final:</span>
+                <span id="final-score" class="text-2xl font-mono font-bold text-amber-400">1500 PTS</span>
+            </div>
+            <div class="mb-4 p-3 rounded-lg bg-slate-800 border border-slate-700 text-left">
+                <div id="send-status" class="text-xs font-semibold text-slate-300">Enviando resultado…</div>
+                <div class="grid grid-cols-2 gap-2 mt-2.5">
+                    <button onclick="resendResult()" class="py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-lg border border-slate-600 transition">🔁 Reenviar</button>
+                    <button onclick="copyReport()" class="py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-lg border border-slate-600 transition">📋 Copiar relatório</button>
+                    <button onclick="downloadReport()" class="py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-lg border border-slate-600 transition">⬇️ Baixar .txt</button>
+                    <button id="btn-wpp" onclick="shareWhatsApp()" class="py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-lg border border-slate-600 transition">💬 WhatsApp</button>
+                    <button id="btn-mail" onclick="shareEmail()" class="py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold rounded-lg border border-slate-600 transition">✉️ E-mail</button>
+                </div>
+            </div>
+            <button onclick="location.reload()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition">
+                🔄 Refazer a simulação
+            </button>
+        </div>
+    </div>
+
+    <!-- Tela de identificação do aluno -->
+    <div id="start-modal" class="fixed inset-0 z-[60] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border-2 border-sky-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="h-1.5 rounded enel-senai-bar mb-4"></div>
+            <h2 class="text-xl font-bold text-white">Simulador 3D — 5 Regras de Ouro NR-10</h2>
+            <p class="text-slate-400 text-xs mb-4">SENAI Sobral · Padrão Enel 13,8 kV. Identifique-se para começar: seu desempenho será registrado e enviado ao instrutor.</p>
+            <label class="text-[11px] uppercase font-bold text-sky-400">Nome completo *</label>
+            <input id="in-nome" type="text" maxlength="80" autocomplete="name" class="w-full mt-1 mb-3 bg-slate-950 border border-slate-600 focus:border-sky-400 rounded-lg px-3 py-2 text-sm text-white outline-none" />
+            <label class="text-[11px] uppercase font-bold text-sky-400">Turma / Matrícula (opcional)</label>
+            <input id="in-turma" type="text" maxlength="40" class="w-full mt-1 mb-2 bg-slate-950 border border-slate-600 focus:border-sky-400 rounded-lg px-3 py-2 text-sm text-white outline-none" />
+            <p id="start-error" class="text-red-400 text-xs h-4 mb-2"></p>
+            <button onclick="startSession()" class="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg transition">▶ Iniciar simulação</button>
+            <p id="start-attempt" class="text-center text-[11px] text-slate-500 mt-2"></p>
+        </div>
+    </div>
+
+    <!-- Container WebGL Three.js -->
+    <div id="canvas-container"></div>
+
+    <script>
+        // =====================================================
+        // 0. CONFIGURAÇÃO DO INSTRUTOR + REGISTRO DE RESPOSTAS
+        // =====================================================
+        const CONFIG = {
+            ENDPOINT_URL: 'https://script.google.com/macros/s/AKfycbybmbpsDpMxq4i9gIstLvfdfJKii4Gl-mICkcKmN3cHZftFqazN4TDDi8QmyvZQDJ-Qvw/exec',        // URL do Web App (Google Apps Script). Vazio = envio manual pela aluna.
+            WHATSAPP_INSTRUTOR: '',  // opcional, com DDI+DDD. Ex.: '5588999999999'
+            EMAIL_INSTRUTOR: '',     // opcional. Ex.: 'instrutor@senai.com'
+            PONTOS_MAXIMOS: 1500,
+            VERSAO: 'nr10-sim-2.0'
+        };
+        const RULE_NAMES = ['Seccionamento', 'Impedimento (LOTO)', 'Ausência de Tensão', 'Aterramento Temporário', 'Proteção Adjacente'];
+        const sess = { id: '', aluno: '', turma: '', tentativa: 1, t0: 0, tRule: 0, fim: 0, done: false, depleted: 0, events: [], rules: [] };
+        const nowMs = () => Date.now();
+        const secs = (ms) => Math.round(ms / 1000);
+        const fmtTime = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+
+        function trackEvent(tipo, detalhe = '') {
+            if (!sess.t0) return;
+            sess.events.push({ t: secs(nowMs() - sess.t0), regra: Math.min(currentStep + 1, 5), tipo, detalhe: String(detalhe) });
+        }
+        function trackError(motivo) { trackEvent('erro', String(motivo).replace(/<[^>]*>/g, '')); }
+
+        function trackRuleDone() {
+            if (!sess.t0) return;
+            const r = currentStep + 1, t = nowMs();
+            sess.rules.push({
+                regra: r, nome: RULE_NAMES[currentStep], tempo_s: secs(t - sess.tRule),
+                erros: sess.events.filter(e => e.tipo === 'erro' && e.regra === r).length
+            });
+            sess.tRule = t;
+            trackEvent('regra_concluida', RULE_NAMES[currentStep]);
+            checkpoint();
+        }
+
+        function buildPayload() {
+            const erros = sess.events.filter(e => e.tipo === 'erro');
+            return {
+                versao: CONFIG.VERSAO, sessao: sess.id, tentativa: sess.tentativa, aluno: sess.aluno, turma: sess.turma,
+                inicio: new Date(sess.t0).toISOString(), fim: sess.done ? new Date(sess.fim).toISOString() : '',
+                concluido: sess.done, regras_concluidas: sess.rules.length,
+                duracao_s: secs((sess.fim || nowMs()) - sess.t0),
+                pontos: score, pontos_max: CONFIG.PONTOS_MAXIMOS, total_erros: erros.length, vidas_esgotadas: sess.depleted,
+                regras: sess.rules, eventos: sess.events, navegador: navigator.userAgent
+            };
+        }
+
+        function buildReport(p, withJson = false) {
+            const L = [];
+            L.push('RELATÓRIO — SIMULADOR NR-10 (SENAI Sobral / Padrão Enel 13,8 kV)');
+            L.push('Aluno: ' + p.aluno + (p.turma ? '  |  Turma/Matrícula: ' + p.turma : ''));
+            L.push('Tentativa nº ' + p.tentativa + '  |  Início: ' + new Date(p.inicio).toLocaleString('pt-BR'));
+            L.push('Situação: ' + (p.concluido ? 'CONCLUÍDO' : 'INCOMPLETO (' + p.regras_concluidas + '/5 regras)'));
+            L.push('Pontuação: ' + p.pontos + '/' + p.pontos_max + '  |  Tempo total: ' + fmtTime(p.duracao_s));
+            L.push('Violações NR-10: ' + p.total_erros + '  |  Vidas esgotadas: ' + p.vidas_esgotadas);
+            L.push('', 'DESEMPENHO POR REGRA');
+            RULE_NAMES.forEach((nome, i) => {
+                const r = p.regras.find(x => x.regra === i + 1);
+                L.push((i + 1) + '. ' + nome + ': ' + (r ? 'ok em ' + fmtTime(r.tempo_s) + ', ' + r.erros + ' erro(s)' : 'não concluída'));
+            });
+            const erros = p.eventos.filter(e => e.tipo === 'erro');
+            L.push('', 'ERROS COMETIDOS' + (erros.length ? '' : ': nenhum'));
+            erros.forEach(e => L.push('[' + fmtTime(e.t) + '] Regra ' + e.regra + ' — ' + e.detalhe));
+            if (withJson) L.push('', '----- DADOS (JSON) -----', JSON.stringify(p));
+            return L.join('\n');
+        }
+
+        async function enviar(payload) {
+            if (!CONFIG.ENDPOINT_URL) return 'manual';
+            const body = JSON.stringify(payload);
+            try {
+                const r = await fetch(CONFIG.ENDPOINT_URL, { method: 'POST', body });
+                const j = await r.json();
+                return j && j.ok ? 'confirmado' : 'erro';
+            } catch (e) {
+                try { await fetch(CONFIG.ENDPOINT_URL, { method: 'POST', body, mode: 'no-cors', keepalive: true }); return 'sem_confirmacao'; }
+                catch (e2) { return 'falha'; }
+            }
+        }
+
+        function checkpoint() {
+            if (!sess.t0) return Promise.resolve('manual');
+            const p = buildPayload();
+            try { localStorage.setItem('nr10_ultimo', JSON.stringify(p)); } catch (e) {}
+            return enviar(p);
+        }
+
+        const STATUS_MSG = {
+            confirmado: ['✅ Resultado enviado ao instrutor com sucesso.', 'text-emerald-400'],
+            sem_confirmacao: ['📨 Resultado enviado (o servidor não retornou confirmação). Para garantir, use também um dos botões abaixo.', 'text-amber-300'],
+            manual: ['ℹ️ Envio automático não configurado. Envie seu relatório ao instrutor por um dos botões abaixo.', 'text-sky-300'],
+            erro: ['⚠️ O servidor recusou o envio. Use os botões abaixo para mandar seu relatório.', 'text-red-400'],
+            falha: ['⚠️ Sem conexão para enviar. Use os botões abaixo para mandar seu relatório.', 'text-red-400']
+        };
+        async function submitFinal() {
+            const el = document.getElementById('send-status');
+            el.className = 'text-xs font-semibold text-slate-300';
+            el.innerText = 'Enviando resultado…';
+            const res = await checkpoint();
+            const [msg, cls] = STATUS_MSG[res] || STATUS_MSG.falha;
+            el.className = 'text-xs font-semibold ' + cls;
+            el.innerText = msg;
+        }
+        function resendResult() { submitFinal(); }
+
+        function finishSession() {
+            sess.done = true;
+            sess.fim = nowMs();
+            trackEvent('simulacao_concluida', 'pontos=' + score);
+            submitFinal();
+        }
+
+        function reportFileName() {
+            return 'NR10_' + sess.aluno.replace(/[^\w]+/g, '_') + '_t' + sess.tentativa + '.txt';
+        }
+        function copyReport() {
+            const txt = buildReport(buildPayload());
+            const done = () => { document.getElementById('send-status').innerText = '📋 Relatório copiado. Cole na conversa com o instrutor.'; };
+            if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done, () => prompt('Copie o relatório:', txt));
+            else prompt('Copie o relatório:', txt);
+        }
+        function downloadReport() {
+            const blob = new Blob([buildReport(buildPayload(), true)], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = reportFileName();
+            document.body.appendChild(a); a.click(); a.remove();
+        }
+        function shareWhatsApp() {
+            window.open('https://wa.me/' + CONFIG.WHATSAPP_INSTRUTOR + '?text=' + encodeURIComponent(buildReport(buildPayload())), '_blank');
+        }
+        function shareEmail() {
+            window.location.href = 'mailto:' + CONFIG.EMAIL_INSTRUTOR + '?subject=' + encodeURIComponent('Resultado NR-10 — ' + sess.aluno) +
+                '&body=' + encodeURIComponent(buildReport(buildPayload()));
+        }
+
+        function startSession() {
+            const nome = document.getElementById('in-nome').value.trim().replace(/\s+/g, ' ');
+            const turma = document.getElementById('in-turma').value.trim();
+            if (nome.length < 3) { document.getElementById('start-error').innerText = 'Informe seu nome completo para continuar.'; return; }
+            let tent = 1;
+            try {
+                const k = 'nr10_tent_' + nome.toLowerCase();
+                tent = (parseInt(localStorage.getItem(k) || '0', 10) || 0) + 1;
+                localStorage.setItem(k, String(tent));
+                localStorage.setItem('nr10_nome', nome); localStorage.setItem('nr10_turma', turma);
+            } catch (e) {}
+            sess.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 's' + nowMs() + Math.random().toString(36).slice(2, 8);
+            sess.aluno = nome; sess.turma = turma; sess.tentativa = tent;
+            sess.t0 = sess.tRule = nowMs();
+            try { audioCtx.resume(); } catch (e) {}
+            document.getElementById('start-modal').classList.add('hidden');
+            trackEvent('inicio');
+            addLog('👤 Aluno: <b>' + nome.replace(/</g, '&lt;') + '</b> — tentativa ' + tent + '.', 'info');
+            checkpoint();
+        }
+
+        // Prefill: memória do navegador ou link personalizado (?aluno=Maria&turma=T12)
+        (function initStart() {
+            const q = new URLSearchParams(location.search);
+            let n = q.get('aluno') || '', t = q.get('turma') || '';
+            try { n = n || localStorage.getItem('nr10_nome') || ''; t = t || localStorage.getItem('nr10_turma') || ''; } catch (e) {}
+            document.getElementById('in-nome').value = n;
+            document.getElementById('in-turma').value = t;
+            if (!CONFIG.WHATSAPP_INSTRUTOR) document.getElementById('btn-wpp').classList.add('hidden');
+            if (!CONFIG.EMAIL_INSTRUTOR) document.getElementById('btn-mail').classList.add('hidden');
+        })();
+
+        // Se a aluna fechar a aba no meio, o progresso parcial ainda chega ao instrutor
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && sess.t0 && !sess.done) { trackEvent('saiu_da_aba'); checkpoint(); }
+        });
+
+        // =====================================================
+        // 1. BANCO DE DADOS DE IDs (BANCADA F-XX & REDE E-XX)
+        // =====================================================
+        const CATALOG_ITEMS = [
+            {
+                id: 'F-01',
+                category: 'Ferramenta (Bancada)',
+                name: 'Vara de Manobra Telescópica',
+                rule: '1ª Regra',
+                desc: 'Isolada para 15kV. Usada para abrir chaves fusíveis a distância.',
+                cameraPreset: 'bench',
+                actionType: 'tool',
+                toolKey: 'vara'
+            },
+            {
+                id: 'F-02',
+                category: 'Ferramenta (Bancada)',
+                name: 'Kit LOTO (Cadeado + Placa)',
+                rule: '2ª Regra',
+                desc: 'Sinalização "NÃO OPERE" e bloqueio contra religamento.',
+                cameraPreset: 'bench',
+                actionType: 'tool',
+                toolKey: 'loto'
+            },
+            {
+                id: 'F-03',
+                category: 'Ferramenta (Bancada)',
+                name: 'Detector de Tensão 15kV',
+                rule: '3ª Regra',
+                desc: 'Verifica ausência de tensão por contato luminoso e sonoro.',
+                cameraPreset: 'bench',
+                actionType: 'tool',
+                toolKey: 'detector'
+            },
+            {
+                id: 'F-04',
+                category: 'Ferramenta (Bancada)',
+                name: 'Conjunto Aterramento Temp.',
+                rule: '4ª Regra',
+                desc: 'Cabos de cobre e grampos para equipotencialização das fases.',
+                cameraPreset: 'bench',
+                actionType: 'tool',
+                toolKey: 'terra'
+            },
+            {
+                id: 'F-05',
+                category: 'Ferramenta (Bancada)',
+                name: 'Mantas Isolantes Laranja',
+                rule: '5ª Regra',
+                desc: 'Coberturas de borracha para isolar condutores energizados vizinhos.',
+                cameraPreset: 'bench',
+                actionType: 'tool',
+                toolKey: 'manta'
+            },
+            {
+                id: 'F-06',
+                category: 'Instrumento (Bancada)',
+                name: 'Módulo Autoteste 15kV',
+                rule: '3ª Regra',
+                desc: 'Fonte de teste obrigatório do detector antes de medir a rede.',
+                cameraPreset: 'bench',
+                actionType: 'equipment'
+            },
+            {
+                id: 'E-01',
+                category: 'Equipamento (Poste)',
+                name: 'Chaves Fusíveis 15kV (A, B, C)',
+                rule: '1ª e 2ª Regra',
+                desc: 'Seccionadoras tipo matraca na cruzeta intermediária (8,4m).',
+                cameraPreset: 'cutouts',
+                actionType: 'equipment'
+            },
+            {
+                id: 'E-02',
+                category: 'Equipamento (Poste)',
+                name: 'Buchas de MT do Trafo (A, B, C)',
+                rule: '3ª e 4ª Regra',
+                desc: 'Terminais primários do transformador 112,5 kVA para teste e terra.',
+                cameraPreset: 'trafo',
+                actionType: 'equipment'
+            },
+            {
+                id: 'E-03',
+                category: 'Equipamento (Solo)',
+                name: 'Trado / Haste de Terra Temporário',
+                rule: '4ª Regra',
+                desc: 'Eletrodo cravado no solo (1º ponto de conexão do aterramento).',
+                cameraPreset: 'trafo',
+                actionType: 'equipment'
+            },
+            {
+                id: 'E-04',
+                category: 'Equipamento (Topo Poste)',
+                name: 'Linha Viva Adjacente 13,8 kV',
+                rule: '5ª Regra',
+                desc: 'Rede primária superior passante que permanece energizada.',
+                cameraPreset: 'cutouts',
+                actionType: 'equipment'
+            }
+        ];
+
+        // =====================================================
+        // 2. SINTETIZADOR DE ÁUDIO (WEB AUDIO API)
+        // =====================================================
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'pickup') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(420, now);
+                osc.frequency.exponentialRampToValueAtTime(760, now + 0.12);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.12);
+                osc.start(now); osc.stop(now + 0.12);
+            } else if (type === 'switch') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(190, now);
+                osc.frequency.exponentialRampToValueAtTime(65, now + 0.2);
+                gain.gain.setValueAtTime(0.35, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now); osc.stop(now + 0.2);
+            } else if (type === 'beep') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(1350, now);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.22);
+                osc.start(now); osc.stop(now + 0.22);
+            } else if (type === 'success') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.setValueAtTime(659.25, now + 0.11);
+                osc.frequency.setValueAtTime(783.99, now + 0.22);
+                gain.gain.setValueAtTime(0.28, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.45);
+                osc.start(now); osc.stop(now + 0.45);
+            } else if (type === 'error') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, now);
+                osc.frequency.linearRampToValueAtTime(55, now + 0.38);
+                gain.gain.setValueAtTime(0.35, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.38);
+                osc.start(now); osc.stop(now + 0.38);
+            }
+        }
+
+        // =====================================================
+        // 3. ESTADO GLOBAL DA SIMULAÇÃO
+        // =====================================================
+        let currentStep = 0;
+        let selectedTool = null;
+        let score = 0;
+        let lives = 3;
+        let showBadges = true;
+
+        let fusesOpened = [false, false, false];
+        let detectorSelfTested = false;
+        let phasesChecked = [false, false, false];
+        let groundRodConnected = false;
+
+        // =====================================================
+        // 4. CENA 3D THREE.JS
+        // =====================================================
+        const container = document.getElementById('canvas-container');
+        const labelsContainer = document.getElementById('labels-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b1325);
+        scene.fog = new THREE.FogExp2(0x0b1325, 0.012);
+
+        const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 200);
+        camera.position.set(6.5, 5.2, 11.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(-0.8, 4.2, 0.5);
+        controls.maxPolarAngle = Math.PI / 2 - 0.02;
+        controls.minDistance = 2.2;
+        controls.maxDistance = 24;
+        controls.update();
+
+        // Transição suave de câmera
+        let camTargetPos = null;
+        let camTargetLook = null;
+
+        function moveCamera(preset) {
+            if (preset === 'overview') {
+                camTargetPos = new THREE.Vector3(6.5, 5.2, 11.5);
+                camTargetLook = new THREE.Vector3(-0.8, 4.2, 0.5);
+            } else if (preset === 'bench') {
+                camTargetPos = new THREE.Vector3(-3.3, 3.0, 5.2);
+                camTargetLook = new THREE.Vector3(-3.3, 1.1, 1.8);
+            } else if (preset === 'cutouts') {
+                camTargetPos = new THREE.Vector3(2.8, 8.6, 5.2);
+                camTargetLook = new THREE.Vector3(0, 8.6, 0.3);
+            } else if (preset === 'trafo') {
+                camTargetPos = new THREE.Vector3(3.6, 4.5, 5.8);
+                camTargetLook = new THREE.Vector3(0.5, 4.2, 1.0);
+            }
+        }
+
+        // Iluminação
+        scene.add(new THREE.AmbientLight(0xdbeafe, 0.72));
+        const sunLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+        sunLight.position.set(14, 24, 16);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        const interactables = [];
+        const floatingBadges = []; // { idCode, pos3D, element, category }
+
+        function createBadge3D(idCode, pos3D, isTool, onClickCallback) {
+            const el = document.createElement('div');
+            el.id = `badge-${idCode}`;
+            el.className = `id-badge-3d ${isTool ? 'badge-tool' : 'badge-equip'}`;
+            el.innerText = idCode;
+            el.title = `Clique para interagir com ${idCode}`;
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onClickCallback();
+            });
+            labelsContainer.appendChild(el);
+            floatingBadges.push({ idCode, pos3D, element: el });
+            return el;
+        }
+
+        // Materiais
+        const matConcrete = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.85 });
+        const matCrossarm = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.7 });
+        const matPorcelain = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.3 });
+        const matCopper = new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.7, roughness: 0.3 });
+        const matTrafo = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.4, roughness: 0.5 });
+        const matFuseTube = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 });
+        const matOrange = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.35 });
+        const matYellow = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.35 });
+        const matRed = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 });
+        const matBlueUniform = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.6 });
+
+        // Solo e Grid
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.95 }));
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        scene.add(new THREE.GridHelper(60, 60, 0x334155, 0x1e293b));
+
+        // =====================================================
+        // 5. MASCOTE 3D: ELETROBRAL (INSTRUTOR SENAI SOBRAL)
+        // =====================================================
+        const mascotGroup = new THREE.Group();
+        mascotGroup.position.set(-1.7, 0, 2.0);
+        mascotGroup.rotation.y = 0.35;
+        scene.add(mascotGroup);
+
+        // Botas, Pernas, Tronco e Faixas Refletivas
+        const bootL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.35), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+        bootL.position.set(-0.16, 0.1, 0.05);
+        const bootR = bootL.clone();
+        bootR.position.x = 0.16;
+        mascotGroup.add(bootL, bootR);
+
+        const legGeo = new THREE.CylinderGeometry(0.1, 0.09, 0.75, 12);
+        const legL = new THREE.Mesh(legGeo, matBlueUniform);
+        legL.position.set(-0.16, 0.55, 0);
+        const legR = legL.clone();
+        legR.position.x = 0.16;
+        mascotGroup.add(legL, legR);
+
+        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.85, 16), matBlueUniform);
+        torso.position.set(0, 1.35, 0);
+        mascotGroup.add(torso);
+
+        const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.285, 0.275, 0.1, 16), matYellow);
+        stripe.position.set(0, 1.4, 0);
+        mascotGroup.add(stripe);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 16), new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.6 }));
+        head.position.set(0, 2.0, 0);
+        mascotGroup.add(head);
+
+        const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12, 0, Math.PI * 2, 0, Math.PI / 1.8), matYellow);
+        helmet.position.set(0, 2.04, 0);
+        mascotGroup.add(helmet);
+
+        const visor = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.23, 0.23, 0.16, 16, 1, true, -Math.PI / 3, (Math.PI * 2) / 3),
+            new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.65, side: THREE.DoubleSide })
+        );
+        visor.position.set(0, 2.0, 0.02);
+        mascotGroup.add(visor);
+
+        const rightArmPivot = new THREE.Group();
+        rightArmPivot.position.set(0.34, 1.65, 0);
+        mascotGroup.add(rightArmPivot);
+
+        const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.65, 12), matBlueUniform);
+        armR.position.set(0, -0.28, 0.15);
+        armR.rotation.x = -Math.PI / 3;
+        rightArmPivot.add(armR);
+
+        const gloveR = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), matOrange);
+        gloveR.position.set(0, -0.5, 0.42);
+        rightArmPivot.add(gloveR);
+
+        // Ferramenta 3D na mão do EletroBral
+        const handToolContainer = new THREE.Group();
+        handToolContainer.position.set(0, -0.5, 0.5);
+        rightArmPivot.add(handToolContainer);
+
+        function updateMascotHandTool(toolKey) {
+            while (handToolContainer.children.length > 0) {
+                handToolContainer.remove(handToolContainer.children[0]);
+            }
+            if (!toolKey) return;
+
+            let mesh;
+            if (toolKey === 'vara') {
+                mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 2.5, 12), matYellow);
+                mesh.position.y = 1.1;
+                mesh.rotation.x = 0.25;
+            } else if (toolKey === 'loto') {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.08), matRed);
+            } else if (toolKey === 'detector') {
+                mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.3, 12), matYellow);
+                const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), matRed);
+                tip.position.y = 0.68;
+                mesh.add(tip);
+                mesh.position.y = 0.5;
+            } else if (toolKey === 'terra') {
+                mesh = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 8, 20), matCopper);
+            } else if (toolKey === 'manta') {
+                mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5, 12), matOrange);
+                mesh.rotation.z = Math.PI / 2;
+            }
+            if (mesh) handToolContainer.add(mesh);
+        }
+
+        // =====================================================
+        // 6. BANCADA DE FERRAMENTAS 3D (F-01 a F-06)
+        // =====================================================
+        const benchGroup = new THREE.Group();
+        benchGroup.position.set(-3.3, 0, 1.8);
+        scene.add(benchGroup);
+
+        const tableTop = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.1, 1.5), new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.6 }));
+        tableTop.position.y = 0.95;
+        tableTop.castShadow = true;
+        benchGroup.add(tableTop);
+
+        [[-1.25, -0.6], [1.25, -0.6], [-1.25, 0.6], [1.25, 0.6]].forEach(([lx, lz]) => {
+            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.95, 8), matCrossarm);
+            leg.position.set(lx, 0.475, lz);
+            benchGroup.add(leg);
+        });
+
+        function registerBenchItem(mesh, pos, idCode, toolKey, isTestUnit = false) {
+            mesh.position.copy(pos);
+            benchGroup.add(mesh);
+
+            const hitbox = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), new THREE.MeshBasicMaterial({ visible: false }));
+            hitbox.position.copy(pos);
+            hitbox.userData = {
+                idCode,
+                type: isTestUnit ? 'detector_tester' : 'bench_tool',
+                toolKey
+            };
+            benchGroup.add(hitbox);
+            interactables.push(hitbox);
+
+            const worldPos = new THREE.Vector3();
+            hitbox.updateMatrixWorld();
+            worldPos.setFromMatrixPosition(hitbox.matrixWorld);
+            worldPos.y += 0.34;
+
+            createBadge3D(idCode, worldPos, true, () => handleObjectInteraction(hitbox.userData));
+        }
+
+        // [F-01] Vara de Manobra 3D
+        const varaMesh = new THREE.Group();
+        const stick1 = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.2, 12), matYellow);
+        stick1.rotation.z = Math.PI / 2;
+        const hook1 = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 12), matCopper);
+        hook1.position.x = 0.62;
+        varaMesh.add(stick1, hook1);
+        registerBenchItem(varaMesh, new THREE.Vector3(-0.65, 1.08, -0.42), 'F-01', 'vara');
+
+        // [F-02] Kit LOTO 3D
+        const lotoMesh = new THREE.Group();
+        const signPlate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.04, 0.24), matRed);
+        const lockBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.12), matYellow);
+        lockBody.position.set(0.1, 0.08, 0);
+        lotoMesh.add(signPlate, lockBody);
+        registerBenchItem(lotoMesh, new THREE.Vector3(0.65, 1.06, -0.42), 'F-02', 'loto');
+
+        // [F-03] Detector de Tensão 15kV 3D
+        const detMesh = new THREE.Group();
+        const detRod = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.65, 12), matYellow);
+        detRod.rotation.z = Math.PI / 2;
+        const detHead = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.14, 16), matRed);
+        detHead.rotation.z = Math.PI / 2;
+        detHead.position.x = 0.32;
+        detMesh.add(detRod, detHead);
+        registerBenchItem(detMesh, new THREE.Vector3(-0.9, 1.08, 0.12), 'F-03', 'detector');
+
+        // [F-06] Módulo de Autoteste Sonoro 3D
+        const testerMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.22), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+        const testerLed = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 12), new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7 }));
+        testerLed.position.y = 0.1;
+        testerMesh.add(testerLed);
+        registerBenchItem(testerMesh, new THREE.Vector3(0.0, 1.08, 0.12), 'F-06', null, true);
+
+        // [F-04] Aterramento Temporário 3D
+        const terraMesh = new THREE.Group();
+        const coil = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.035, 10, 24), matCopper);
+        coil.rotation.x = Math.PI / 2;
+        terraMesh.add(coil);
+        registerBenchItem(terraMesh, new THREE.Vector3(0.9, 1.08, 0.12), 'F-04', 'terra');
+
+        // [F-05] Mantas Isolantes Laranja 3D
+        const mantaMesh = new THREE.Group();
+        const roll1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.46, 16), matOrange);
+        roll1.rotation.z = Math.PI / 2;
+        const roll2 = roll1.clone();
+        roll2.position.z = 0.15;
+        mantaMesh.add(roll1, roll2);
+        registerBenchItem(mantaMesh, new THREE.Vector3(0.0, 1.1, 0.52), 'F-05', 'manta');
+
+        // =====================================================
+        // 7. POSTE E EQUIPAMENTOS DA REDE ENEL (E-01 a E-04)
+        // =====================================================
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 12, 16), matConcrete);
+        pole.position.y = 6;
+        pole.castShadow = true;
+        scene.add(pole);
+
+        // Cruzeta Superior e Rede Primária 13,8 kV [E-04]
+        const crossarmTop = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.18, 0.18), matCrossarm);
+        crossarmTop.position.set(0, 10.5, 0.22);
+        scene.add(crossarmTop);
+
+        const phaseX = [-1.4, 0, 1.4];
+        const blanketMeshes = [];
+        phaseX.forEach((x, idx) => {
+            const ins = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.28, 12), matPorcelain);
+            ins.position.set(x, 10.7, 0.22);
+            scene.add(ins);
+
+            const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 14, 8), new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.8 }));
+            wire.rotation.x = Math.PI / 2;
+            wire.position.set(x, 10.85, 0.22);
+            scene.add(wire);
+
+            const wireHitbox = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 4.0), new THREE.MeshBasicMaterial({ visible: false }));
+            wireHitbox.position.set(x, 10.85, 0.22);
+            wireHitbox.userData = { idCode: 'E-04', type: 'primary_wire', phase: idx };
+            scene.add(wireHitbox);
+            interactables.push(wireHitbox);
+
+            const blanket = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 3.4, 12), matOrange);
+            blanket.rotation.x = Math.PI / 2;
+            blanket.position.set(x, 10.85, 0.22);
+            blanket.visible = false;
+            scene.add(blanket);
+            blanketMeshes.push(blanket);
+        });
+
+        createBadge3D('E-04', new THREE.Vector3(0, 11.35, 0.22), false, () => {
+            handleObjectInteraction({ idCode: 'E-04', type: 'primary_wire' });
+        });
+
+        // Cruzeta Intermediária e 3 Chaves Fusíveis [E-01]
+        const crossarmMid = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.16, 0.16), matCrossarm);
+        crossarmMid.position.set(0, 8.4, 0.25);
+        scene.add(crossarmMid);
+
+        const fusePivots = [];
+        const fuseTubesRef = [];
+        const fuseX = [-1.1, 0, 1.1];
+        fuseX.forEach((x, idx) => {
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.65, 0.2), matPorcelain);
+            body.position.set(x, 8.4, 0.45);
+            scene.add(body);
+
+            const pivot = new THREE.Group();
+            pivot.position.set(x, 8.1, 0.58);
+            scene.add(pivot);
+
+            const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.65, 12), matFuseTube);
+            tube.position.set(0, 0.32, 0);
+            tube.rotation.x = -0.15;
+
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.015, 8, 16), matCopper);
+            ring.position.set(0, 0.62, 0.05);
+            tube.add(ring);
+
+            const hitbox = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.0, 0.55), new THREE.MeshBasicMaterial({ visible: false }));
+            hitbox.position.set(0, 0.32, 0);
+            hitbox.userData = { idCode: 'E-01', type: 'fuse_switch', index: idx, tube };
+
+            pivot.add(tube, hitbox);
+            interactables.push(hitbox);
+            fusePivots.push(pivot);
+            fuseTubesRef.push(tube);
+        });
+
+        createBadge3D('E-01', new THREE.Vector3(0, 9.05, 0.6), false, () => {
+            // Se clicar direto no badge E-01, aciona a próxima chave fusível pendente ou todas
+            const nextIdx = fusesOpened.findIndex(v => !v);
+            const targetIdx = nextIdx !== -1 ? nextIdx : 0;
+            handleObjectInteraction({ idCode: 'E-01', type: 'fuse_switch', index: targetIdx, tube: fuseTubesRef[targetIdx] });
+        });
+
+        const lotoSignOnPole = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.48, 0.06), matRed);
+        lotoSignOnPole.position.set(0, 7.75, 0.5);
+        lotoSignOnPole.visible = false;
+        scene.add(lotoSignOnPole);
+
+        // Transformador e Buchas Primárias [E-02]
+        const trafoTank = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.68, 1.5, 24), matTrafo);
+        trafoTank.position.set(0, 5.4, 0.95);
+        trafoTank.castShadow = true;
+        scene.add(trafoTank);
+
+        const bushTerminals = [];
+        const bushX = [-0.42, 0, 0.42];
+        bushX.forEach((x, idx) => {
+            const bushing = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.45, 12), matPorcelain);
+            bushing.position.set(x, 6.35, 0.95);
+
+            const terminal = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 12), matCopper);
+            terminal.position.set(0, 0.25, 0);
+            bushing.add(terminal);
+
+            const bushHitbox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.75, 0.4), new THREE.MeshBasicMaterial({ visible: false }));
+            bushHitbox.position.set(x, 6.4, 0.95);
+            bushHitbox.userData = { idCode: 'E-02', type: 'trafo_bushing', index: idx, terminal };
+
+            scene.add(bushing, bushHitbox);
+            interactables.push(bushHitbox);
+            bushTerminals.push(terminal);
+        });
+
+        createBadge3D('E-02', new THREE.Vector3(0, 7.0, 0.95), false, () => {
+            const nextIdx = phasesChecked.findIndex(v => !v);
+            const targetIdx = nextIdx !== -1 ? nextIdx : 0;
+            handleObjectInteraction({ idCode: 'E-02', type: 'trafo_bushing', index: targetIdx, terminal: bushTerminals[targetIdx] });
+        });
+
+        // Trado de Aterramento no Solo [E-03]
+        const groundRod = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.95, 12), matCopper);
+        groundRod.position.set(2.2, 0.47, 1.5);
+        scene.add(groundRod);
+
+        const groundHitbox = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.4, 0.9), new THREE.MeshBasicMaterial({ visible: false }));
+        groundHitbox.position.set(2.2, 0.65, 1.5);
+        groundHitbox.userData = { idCode: 'E-03', type: 'ground_rod' };
+        scene.add(groundHitbox);
+        interactables.push(groundHitbox);
+
+        createBadge3D('E-03', new THREE.Vector3(2.2, 1.25, 1.5), false, () => {
+            handleObjectInteraction({ idCode: 'E-03', type: 'ground_rod' });
+        });
+
+        // Cabos de Aterramento Temporário e Cones
+        const groundCablesGroup = new THREE.Group();
+        bushX.forEach((x) => {
+            const curve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(2.2, 0.85, 1.5),
+                new THREE.Vector3(1.2, 3.5, 1.4),
+                new THREE.Vector3(x, 6.6, 0.95)
+            ]);
+            const cableMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.032, 8, false), matCopper);
+            groundCablesGroup.add(cableMesh);
+        });
+        groundCablesGroup.visible = false;
+        scene.add(groundCablesGroup);
+
+        const conesGroup = new THREE.Group();
+        [[-2.2, 2.8], [2.5, 2.8], [-2.2, -2.0], [2.5, -2.0], [0.2, 3.3]].forEach(([cx, cz]) => {
+            const cone = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.75, 16), matOrange);
+            cone.position.set(cx, 0.375, cz);
+            conesGroup.add(cone);
+        });
+        conesGroup.visible = false;
+        scene.add(conesGroup);
+
+        // =====================================================
+        // 8. CATÁLOGO LATERAL DE IDs (RENDER E BUSCA)
+        // =====================================================
+        function renderCatalog(filterText = '') {
+            const listEl = document.getElementById('catalog-list');
+            listEl.innerHTML = '';
+            const query = filterText.trim().toLowerCase();
+
+            const filtered = CATALOG_ITEMS.filter(item =>
+                item.id.toLowerCase().includes(query) ||
+                item.name.toLowerCase().includes(query) ||
+                item.rule.toLowerCase().includes(query) ||
+                item.desc.toLowerCase().includes(query)
+            );
+
+            filtered.forEach(item => {
+                const isTool = item.id.startsWith('F-');
+                const card = document.createElement('div');
+                card.className = 'p-2 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 hover:border-sky-500/60 transition cursor-pointer flex items-start justify-between space-x-2';
+                
+                card.onmouseenter = () => highlightBadge(item.id, true);
+                card.onmouseleave = () => highlightBadge(item.id, false);
+                card.onclick = () => {
+                    moveCamera(item.cameraPreset);
+                    highlightBadge(item.id, true);
+                    // Se for uma ferramenta da bancada, permite selecionar diretamente pelo catálogo também
+                    if (item.actionType === 'tool') {
+                        equipToolFromBench(item.toolKey, item.id);
+                    }
+                };
+
+                card.innerHTML = `
+                    <div class="flex items-start space-x-2">
+                        <span class="px-1.5 py-0.5 rounded font-mono text-[11px] font-extrabold shrink-0 ${isTool ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">
+                            ${item.id}
+                        </span>
+                        <div>
+                            <div class="text-xs font-bold text-white leading-tight">${item.name}</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">${item.desc}</div>
+                        </div>
+                    </div>
+                    <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">${item.rule}</span>
+                `;
+                listEl.appendChild(card);
+            });
+        }
+
+        function filterCatalog(val) {
+            renderCatalog(val);
+        }
+
+        function highlightBadge(idCode, active) {
+            const el = document.getElementById(`badge-${idCode}`);
+            if (!el) return;
+            if (active) el.classList.add('badge-ping');
+            else el.classList.remove('badge-ping');
+        }
+
+        function toggleBadgeVisibility() {
+            showBadges = !showBadges;
+            document.getElementById('btn-toggle-ids').innerText = `🏷️ IDs: ${showBadges ? 'ON' : 'OFF'}`;
+            labelsContainer.style.display = showBadges ? 'block' : 'none';
+        }
+
+        renderCatalog();
+
+        // =====================================================
+        // 9. LÓGICA DE INTERAÇÃO E REGRAS NR-10
+        // =====================================================
+        function mascotSay(text) {
+            document.getElementById('mascot-speech').innerHTML = `"${text}"`;
+        }
+
+        function addLog(text, type = 'info') {
+            const logBox = document.getElementById('log-box');
+            const div = document.createElement('div');
+            const colors = {
+                info: 'border-sky-500 text-slate-200',
+                success: 'border-emerald-500 text-emerald-300 bg-emerald-950/40',
+                error: 'border-red-500 text-red-300 bg-red-950/50'
+            };
+            div.className = `p-1.5 rounded bg-slate-800/90 border-l-4 ${colors[type]}`;
+            div.innerHTML = text;
+            logBox.prepend(div);
+        }
+
+        function penalize(reason, mascotAdvice) {
+            playSound('error');
+            lives = Math.max(0, lives - 1);
+            trackError(reason);
+            score = Math.max(0, score - 150);
+            document.getElementById('lives-display').innerText = '❤️'.repeat(lives) + '🖤'.repeat(3 - lives);
+            document.getElementById('score-display').innerText = String(score).padStart(4, '0');
+            addLog(`⚠️ <b>VIOLAÇÃO NR-10:</b> ${reason}`, 'error');
+            if (mascotAdvice) mascotSay(mascotAdvice);
+
+            if (lives === 0) {
+                sess.depleted++;
+                trackEvent('vidas_esgotadas');
+                lives = 3;
+                document.getElementById('lives-display').innerText = '❤️❤️❤️';
+            }
+        }
+
+        function reward(points, msg, mascotMsg) {
+            playSound('success');
+            score += points;
+            document.getElementById('score-display').innerText = String(score).padStart(4, '0');
+            addLog(`✅ ${msg}`, 'success');
+            if (mascotMsg) mascotSay(mascotMsg);
+        }
+
+        function advanceStep() {
+            trackRuleDone();
+            const prevRule = document.getElementById(`rule-${currentStep}`);
+            prevRule.classList.remove('step-active', 'border-amber-400', 'bg-amber-500/10');
+            prevRule.classList.add('border-emerald-500', 'bg-emerald-500/10');
+            prevRule.querySelector('.status-icon').innerText = '✅';
+
+            currentStep++;
+            if (currentStep < 5) {
+                document.getElementById('step-counter').innerText = `Regra ${currentStep + 1}/5`;
+                const nextRule = document.getElementById(`rule-${currentStep}`);
+                nextRule.classList.remove('opacity-60', 'border-slate-700', 'bg-slate-800/50');
+                nextRule.classList.add('step-active', 'border-amber-400', 'bg-amber-500/10');
+                nextRule.querySelector('.status-icon').innerText = '⏳';
+            } else {
+                document.getElementById('final-score').innerText = `${score} PTS`;
+                document.getElementById('victory-modal').classList.remove('hidden');
+                finishSession();
+            }
+        }
+
+        function equipToolFromBench(toolKey, idCode) {
+            playSound('pickup');
+            selectedTool = toolKey;
+            updateMascotHandTool(toolKey);
+
+            const itemInfo = CATALOG_ITEMS.find(i => i.id === idCode);
+            document.getElementById('held-tool-id').innerText = idCode;
+            document.getElementById('held-tool-id').className = 'px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-mono text-xs font-extrabold';
+            document.getElementById('held-tool-name').innerText = itemInfo ? itemInfo.name : idCode;
+            document.getElementById('held-tool-desc').innerText = itemInfo ? itemInfo.desc : '';
+
+            document.querySelectorAll('.id-badge-3d').forEach(b => b.classList.remove('badge-selected'));
+            const badgeEl = document.getElementById(`badge-${idCode}`);
+            if (badgeEl) badgeEl.classList.add('badge-selected');
+
+            trackEvent('pegou_ferramenta', idCode);
+            addLog(`🧰 Selecionado <b>[${idCode}] ${itemInfo ? itemInfo.name : ''}</b>.`, 'info');
+        }
+
+        function handleObjectInteraction(data) {
+            // 1. Pegar ferramenta na bancada [F-01 a F-05]
+            if (data.type === 'bench_tool') {
+                equipToolFromBench(data.toolKey, data.idCode);
+                return;
+            }
+
+            // 2. Testar Detector no Módulo [F-06]
+            if (data.type === 'detector_tester') {
+                if (selectedTool !== 'detector') {
+                    penalize('Pegue primeiro o Detector [F-03] antes de acionar o módulo de Autoteste [F-06]!', 'Pegue o [F-03] primeiro!');
+                    return;
+                }
+                playSound('beep');
+                detectorSelfTested = true;
+                trackEvent('autoteste_detector', 'F-06');
+                addLog('🔊 [F-06 AUTOTESTE OK]: Detector [F-03] testado! Agora clique nas buchas [E-02].', 'info');
+                mascotSay('Detector testado em [F-06]! Agora meça as 3 buchas em [E-02].');
+                return;
+            }
+
+            // 3. Interações na Rede Elétrica por Regra
+            if (currentStep === 0) {
+                if (selectedTool !== 'vara') {
+                    penalize('Para a 1ª Regra, selecione [F-01] Vara de Manobra antes de tocar em [E-01]!', 'Pegue a Vara [F-01] na bancada!');
+                    return;
+                }
+                if (data.type === 'fuse_switch') {
+                    if (!fusesOpened[data.index]) {
+                        playSound('switch');
+                        fusesOpened[data.index] = true;
+                        trackEvent('abriu_chave', 'E-01 fase ' + 'ABC'[data.index]);
+                        data.tube.rotation.x = 2.25;
+                        addLog(`🦯 [E-01] Chave Fusível Fase ${['A','B','C'][data.index]} aberta com [F-01].`, 'info');
+
+                        if (fusesOpened.every(v => v)) {
+                            document.getElementById('grid-status').innerText = 'SECCIONADO';
+                            document.getElementById('grid-status').className = 'text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950';
+                            reward(300, '<b>1ª Regra Concluída:</b> As 3 chaves de [E-01] foram abertas!', 'Excelente! Agora pegue o bloqueio [F-02] e aplique em [E-01].');
+                            advanceStep();
+                        }
+                    }
+                } else {
+                    penalize('Clique nas Chaves Fusíveis [E-01] para abrir o circuito primeiro!', 'O 1º passo é em [E-01]!');
+                }
+            }
+
+            else if (currentStep === 1) {
+                if (selectedTool !== 'loto') {
+                    penalize('Para a 2ª Regra, pegue o Kit LOTO [F-02] na bancada!', 'Pegue [F-02] na bancada!');
+                    return;
+                }
+                if (data.type === 'fuse_switch') {
+                    trackEvent('aplicou_loto', 'F-02 em E-01');
+                    fusePivots.forEach(p => p.visible = false);
+                    lotoSignOnPole.visible = true;
+                    reward(300, '<b>2ª Regra Concluída:</b> Cartuchos retirados e bloqueio [F-02] instalado em [E-01]!', 'Boa! Agora pegue o Detector [F-03] e teste em [F-06].');
+                    advanceStep();
+                } else {
+                    penalize('Aplique o bloqueio [F-02] diretamente nas Chaves Fusíveis [E-01]!', 'Clique em [E-01] para bloquear!');
+                }
+            }
+
+            else if (currentStep === 2) {
+                if (selectedTool !== 'detector') {
+                    penalize('Pegue o Detector [F-03] na bancada para verificar ausência de tensão!', 'Selecione [F-03] na bancada!');
+                    return;
+                }
+                if (!detectorSelfTested) {
+                    penalize('NR-10 exige testar o Detector [F-03] no módulo [F-06] ANTES de medir [E-02]!', 'Clique em [F-06] na bancada para testar o detector antes!');
+                    return;
+                }
+                if (data.type === 'trafo_bushing') {
+                    if (!phasesChecked[data.index]) {
+                        playSound('beep');
+                        phasesChecked[data.index] = true;
+                        trackEvent('mediu_bucha', 'E-02 fase ' + 'ABC'[data.index]);
+                        data.terminal.material = new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x15803d });
+                        addLog(`📡 [E-02] Bucha Fase ${['A','B','C'][data.index]}: 0,0 kV verificado.`, 'info');
+
+                        if (phasesChecked.every(v => v)) {
+                            reward(300, '<b>3ª Regra Concluída:</b> Ausência de tensão constatada nas 3 buchas [E-02]!', 'Zero Volts! Agora pegue [F-04] e ligue 1º em [E-03] (solo) e 2º em [E-02].');
+                            advanceStep();
+                        }
+                    }
+                } else {
+                    penalize('Clique nas 3 Buchas do Transformador [E-02] para medir!', 'Meça nas buchas [E-02]!');
+                }
+            }
+
+            else if (currentStep === 3) {
+                if (selectedTool !== 'terra') {
+                    penalize('Pegue o Conjunto de Aterramento [F-04] na bancada!', 'Pegue [F-04] na bancada!');
+                    return;
+                }
+                if (data.type === 'ground_rod') {
+                    playSound('switch');
+                    groundRodConnected = true;
+                    trackEvent('conectou_terra', 'F-04 em E-03');
+                    groundRod.material = new THREE.MeshStandardMaterial({ color: 0x22c55e });
+                    addLog('⚡ [E-03] Aterramento conectado à haste no solo! Agora clique em [E-02].', 'info');
+                    mascotSay('Trado [E-03] conectado! Agora suba o cabo para as buchas [E-02].');
+                } else if (data.type === 'trafo_bushing') {
+                    if (!groundRodConnected) {
+                        penalize('ERRO GRAVE: Conecte [F-04] PRIMEIRO no Trado de Terra [E-03] no solo e SÓ DEPOIS em [E-02]!', 'Primeiro na terra [E-03], depois na fase [E-02]!');
+                        return;
+                    }
+                    groundCablesGroup.visible = true;
+                    trackEvent('conectou_fase', 'F-04 em E-02');
+                    document.getElementById('grid-status').innerText = 'ATERRADO E EQUIPOTENCIALIZADO';
+                    document.getElementById('grid-status').className = 'text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white';
+                    reward(300, '<b>4ª Regra Concluída:</b> Aterramento instalado ([E-03] ➔ [E-02])!', 'Falta só a 5ª Regra: pegue as Mantas [F-05] e isole [E-04].');
+                    advanceStep();
+                } else {
+                    penalize('Conecte 1º em [E-03] (solo) e 2º em [E-02] (transformador)!', 'Use [E-03] e depois [E-02]!');
+                }
+            }
+
+            else if (currentStep === 4) {
+                if (selectedTool !== 'manta') {
+                    penalize('Pegue as Mantas Isolantes [F-05] na bancada!', 'Pegue [F-05] na bancada!');
+                    return;
+                }
+                if (data.type === 'primary_wire') {
+                    trackEvent('aplicou_mantas', 'F-05 em E-04');
+                    blanketMeshes.forEach(b => b.visible = true);
+                    conesGroup.visible = true;
+                    reward(300, '<b>5ª Regra Concluída:</b> Linha viva [E-04] protegida com [F-05] e área isolada!', 'Parabéns! As 5 Regras de Ouro foram concluídas com perfeição!');
+                    advanceStep();
+                } else {
+                    penalize('Clique nos condutores superiores [E-04] para instalar as mantas [F-05]!', 'Aplique no topo do poste em [E-04]!');
+                }
+            }
+        }
+
+        // Raycasting nos Modelos 3D
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('pointerdown', (event) => {
+            if (event.target.tagName !== 'CANVAS') return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactables);
+            if (intersects.length > 0) {
+                handleObjectInteraction(intersects[0].object.userData);
+            }
+        });
+
+        // Projeção 3D -> 2D das Pílulas Compactas de ID
+        function updateFloatingBadges() {
+            if (!showBadges) return;
+            const halfW = window.innerWidth / 2;
+            const halfH = window.innerHeight / 2;
+
+            floatingBadges.forEach(item => {
+                const projected = item.pos3D.clone().project(camera);
+                if (projected.z > 1) {
+                    item.element.style.display = 'none';
+                } else {
+                    item.element.style.display = 'block';
+                    item.element.style.left = `${projected.x * halfW + halfW}px`;
+                    item.element.style.top = `${-(projected.y * halfH) + halfH}px`;
+                }
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        let clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const t = clock.getElapsedTime();
+
+            // Animação suave de respiração do EletroBral
+            mascotGroup.position.y = Math.sin(t * 2.5) * 0.025;
+
+            if (camTargetPos && camTargetLook) {
+                camera.position.lerp(camTargetPos, 0.08);
+                controls.target.lerp(camTargetLook, 0.08);
+                if (camera.position.distanceTo(camTargetPos) < 0.08) {
+                    camTargetPos = null;
+                    camTargetLook = null;
+                }
+            }
+
+            controls.update();
+            updateFloatingBadges();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
