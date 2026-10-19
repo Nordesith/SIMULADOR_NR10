@@ -881,7 +881,7 @@
             interactables.push(hitbox);
 
             const worldPos = new THREE.Vector3();
-            hitbox.updateMatrixWorld();
+            benchGroup.updateMatrixWorld(true); // aplica o deslocamento da bancada antes de ler a posição mundial
             worldPos.setFromMatrixPosition(hitbox.matrixWorld);
             worldPos.y += 0.34;
 
